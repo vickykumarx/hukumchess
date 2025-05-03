@@ -335,35 +335,88 @@ export default function useChessGame(): UseChessGameReturn {
   
   // Select a square on the board
   const selectSquare = useCallback((square: Square) => {
-    if (gameState !== "in_progress" || !isPlayerTurn) return;
-    
-    const piece = chess.get(square);
-    
-    // If a piece belonging to the player is clicked, show legal moves
-    if (piece && ((piece.color === 'w' && playerSide === "white") || (piece.color === 'b' && playerSide === "black"))) {
-      setSelectedSquare(square);
-      setLegalMoves(getLegalMovesForSquare(chess, square));
+    if (gameState !== "in_progress" || !isPlayerTurn) {
+      setStatus(gameState !== "in_progress" ? "Game not in progress" : "Not your turn");
+      return;
     }
-    // If a legal destination square is clicked, make the move
-    else if (selectedSquare && legalMoves.includes(square)) {
-      makeMove(selectedSquare, square);
-    }
-    // If another square is clicked, deselect
-    else {
-      setSelectedSquare(null);
-      setLegalMoves([]);
+    
+    try {
+      const piece = chess.get(square);
+      const playerColor = playerSide === "white" ? 'w' : 'b';
+      
+      // Case 1: Player clicks on their own piece
+      if (piece && piece.color === playerColor) {
+        // Show legal moves for this piece
+        const moves = getLegalMovesForSquare(chess, square);
+        setSelectedSquare(square);
+        setLegalMoves(moves);
+        
+        // Provide feedback about the selected piece
+        setStatus(`Selected ${piece.type.toUpperCase()} at ${square}. ${moves.length} possible moves.`);
+      } 
+      // Case 2: Player clicks on a legal destination square after selecting a piece
+      else if (selectedSquare && legalMoves.includes(square)) {
+        // Execute the move
+        makeMove(selectedSquare, square);
+      }
+      // Case 3: Player clicks on opponent's piece and has a piece selected
+      else if (piece && piece.color !== playerColor && selectedSquare) {
+        // Check if this is a legal capture
+        if (legalMoves.includes(square)) {
+          makeMove(selectedSquare, square);
+        } else {
+          // Not a legal capture, show message
+          setStatus(`Can't capture that piece. Select one of your pieces first.`);
+          setSelectedSquare(null);
+          setLegalMoves([]);
+        }
+      }
+      // Case 4: Player clicks on empty square or opponent's piece without selecting their own first
+      else {
+        setSelectedSquare(null);
+        setLegalMoves([]);
+        
+        // Provide clear guidance
+        if (piece && piece.color !== playerColor) {
+          setStatus(`That's an opponent's piece. Select one of your ${playerSide} pieces first.`);
+        } else {
+          setStatus(`Select one of your ${playerSide} pieces to move.`);
+        }
+      }
+    } catch (error) {
+      console.error("Error in selectSquare:", error);
+      setStatus("An error occurred when selecting a square");
     }
   }, [chess, gameState, isPlayerTurn, playerSide, selectedSquare, legalMoves, makeMove]);
   
   // Handle capture button click
   const handleCapture = useCallback((piece: string, square: Square) => {
-    // Implement capture functionality
-    if (gameState !== "in_progress" || !isPlayerTurn) return;
+    if (gameState !== "in_progress" || !isPlayerTurn) {
+      setStatus(gameState !== "in_progress" ? "Game not in progress" : "Not your turn");
+      return;
+    }
     
     if (selectedSquare) {
-      makeMove(selectedSquare, square);
+      try {
+        // Verify the target square is a legal move
+        if (legalMoves.includes(square)) {
+          // Execute the capture move
+          const success = makeMove(selectedSquare, square);
+          
+          if (!success) {
+            setStatus(`Couldn't capture the ${piece}. Try a different move.`);
+          }
+        } else {
+          setStatus(`Invalid capture target. Please select a valid move.`);
+        }
+      } catch (error) {
+        console.error("Error in handleCapture:", error);
+        setStatus("Error occurred during capture");
+      }
+    } else {
+      setStatus("Select one of your pieces first before capturing");
     }
-  }, [gameState, isPlayerTurn, selectedSquare, makeMove]);
+  }, [gameState, isPlayerTurn, selectedSquare, legalMoves, makeMove]);
   
   // Check if the game is over
   const checkGameOver = useCallback((): boolean => {

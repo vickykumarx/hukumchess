@@ -26,28 +26,45 @@ export default function useTimer({
 
   // Start/stop timer based on isActive prop
   useEffect(() => {
+    // Clear any existing timer
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    
+    // Only start timer if active and time remaining
     if (isActive && timeRemaining > 0) {
       timerRef.current = setInterval(() => {
         setTimeRemaining(prevTime => {
+          // When timer reaches 0 or below
           if (prevTime <= 1) {
+            // Clean up interval
             if (timerRef.current) {
               clearInterval(timerRef.current);
+              timerRef.current = null;
             }
-            if (onTimeUp) {
-              onTimeUp();
-            }
+            
+            // Call onTimeUp callback after a small delay to ensure state updates
+            setTimeout(() => {
+              if (onTimeUp) {
+                onTimeUp();
+              }
+            }, 50);
+            
             return 0;
           }
+          
+          // Otherwise decrement timer
           return prevTime - 1;
         });
       }, 1000);
-    } else if (!isActive && timerRef.current) {
-      clearInterval(timerRef.current);
     }
 
+    // Cleanup on unmount or deps change
     return () => {
       if (timerRef.current) {
         clearInterval(timerRef.current);
+        timerRef.current = null;
       }
     };
   }, [isActive, timeRemaining, onTimeUp]);
@@ -59,11 +76,23 @@ export default function useTimer({
 
   // Reset timer with a new time value
   const resetTimer = useCallback((newTime: number) => {
+    // Ensure newTime is a positive number
+    const validTime = Math.max(0, newTime);
+    
+    // Clear any existing timer
     if (timerRef.current) {
       clearInterval(timerRef.current);
+      timerRef.current = null;
     }
-    setTimeRemaining(newTime);
-    setIsTimerLow(false);
+    
+    // Reset timer values
+    setTimeRemaining(validTime);
+    setIsTimerLow(validTime <= 10 && validTime > 0);
+    
+    // Log timer reset for debugging
+    console.log(`Timer reset to ${validTime} seconds`);
+    
+    return validTime; // Return the new time value for chaining
   }, []);
 
   return { timeRemaining, isTimerLow, resetTimer };

@@ -54,11 +54,11 @@ const ChessBoard: React.FC<ChessBoardProps> = ({
     };
   }, []);
 
-  // Custom board colors
+  // Handle piece selection and move indicators
   const customSquareStyles = () => {
     const squares: Record<string, React.CSSProperties> = {};
     
-    // Beige and brown colors
+    // Beige and brown colors - standard chess board pattern
     for (let i = 0; i < 8; i++) {
       for (let j = 0; j < 8; j++) {
         const square = String.fromCharCode(97 + j) + (8 - i) as Square;
@@ -68,20 +68,35 @@ const ChessBoard: React.FC<ChessBoardProps> = ({
       }
     }
     
-    // Highlight selected square
+    // Highlight selected square with a strong indicator
     if (selectedSquare) {
       squares[selectedSquare] = {
         ...squares[selectedSquare],
-        backgroundColor: 'rgba(249, 115, 22, 0.6)'
+        backgroundColor: 'rgba(249, 115, 22, 0.6)',
+        boxShadow: 'inset 0 0 0 4px rgba(249, 115, 22, 0.8)'
       };
     }
     
-    // Highlight legal moves
+    // Highlight legal moves with different styles based on whether the square is occupied or not
     legalMoves.forEach(move => {
-      squares[move] = {
-        ...squares[move],
-        background: `radial-gradient(circle, rgba(249, 115, 22, 0.5) 25%, ${(squares[move]?.backgroundColor as string) || 'transparent'} 25%)`
-      };
+      // Check if destination square has a piece (would be a capture) - show a different indicator
+      const isPotentialCapture = fen.split(' ')[0].split('/').join('').includes(move);
+      
+      if (isPotentialCapture) {
+        // For capture moves, show a stronger highlight
+        squares[move] = {
+          ...squares[move],
+          boxShadow: 'inset 0 0 0 4px rgba(220, 38, 38, 0.7)',
+          cursor: 'pointer'
+        };
+      } else {
+        // For empty square moves, show a dot
+        squares[move] = {
+          ...squares[move],
+          background: `radial-gradient(circle, rgba(249, 115, 22, 0.6) 25%, ${(squares[move]?.backgroundColor as string) || 'transparent'} 25%)`,
+          cursor: 'pointer'
+        };
+      }
     });
     
     return squares;
