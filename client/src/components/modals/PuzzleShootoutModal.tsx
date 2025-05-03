@@ -1,13 +1,15 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, RefreshCw, CheckCircle, XCircle } from "lucide-react";
-import { Chess } from "chess.js";
+import { Loader2, RefreshCw, CheckCircle, XCircle, Clock, Trophy } from "lucide-react";
+import { Chess, Square } from "chess.js";
 import { Chessboard } from "react-chessboard";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { Progress } from "@/components/ui/progress";
+import useTimer from "@/hooks/useTimer";
 
 interface PuzzleShootoutModalProps {
   isOpen: boolean;
@@ -35,8 +37,24 @@ const PuzzleShootoutModal: React.FC<PuzzleShootoutModalProps> = ({
   const [mateIn, setMateIn] = useState(2);
   const [isProcessing, setIsProcessing] = useState(false);
   const [userWon, setUserWon] = useState(false);
+  const [aiLost, setAiLost] = useState(false);
   const [puzzleSolved, setPuzzleSolved] = useState<boolean | null>(null);
+  const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
+  const [legalMoves, setLegalMoves] = useState<Square[]>([]);
   const { toast } = useToast();
+  
+  // Timer for countdown (15 seconds per puzzle for AI to solve)
+  const { timeRemaining, isTimerLow, resetTimer, stopTimer } = useTimer({
+    initialTime: 15,
+    isActive: isProcessing,
+    onTimeUp: () => {
+      // AI couldn't solve in time - player wins
+      setUserWon(true);
+      setPuzzleSolved(false);
+      setIsProcessing(false);
+      stopTimer();
+    }
+  });
 
   // Initialize chess instance for puzzle editor
   const [chess] = useState(new Chess());
@@ -46,6 +64,15 @@ const PuzzleShootoutModal: React.FC<PuzzleShootoutModalProps> = ({
       fetchPuzzles();
     }
   }, [isOpen, gameId]);
+  
+  // Reset timer to 15 seconds when processing starts
+  useEffect(() => {
+    if (isProcessing) {
+      resetTimer(15);
+    } else {
+      stopTimer();
+    }
+  }, [isProcessing, resetTimer, stopTimer]);
 
   const fetchPuzzles = async () => {
     if (!gameId) return;
@@ -68,11 +95,33 @@ const PuzzleShootoutModal: React.FC<PuzzleShootoutModalProps> = ({
   const handleSquareClick = (square: string) => {
     // Handle square click for chess puzzle editor
     try {
-      const moves = chess.moves({ square, verbose: true });
+      // Type assertion to convert string to Square type
+      const chessSquare = square as Square;
+      
+      if (selectedSquare === chessSquare) {
+        // If clicking the same square, deselect it
+        setSelectedSquare(null);
+        setLegalMoves([]);
+        return;
+      }
+      
+      // Get legal moves for the clicked square
+      const moves = chess.moves({ square: chessSquare, verbose: true });
+      
       if (moves.length > 0) {
-        // Just make the first legal move
-        chess.move(moves[0]);
+        // Show available moves
+        setSelectedSquare(chessSquare);
+        setLegalMoves(moves.map(move => move.to as Square));
+      } else if (selectedSquare && legalMoves.includes(chessSquare)) {
+        // Make a move if a piece is already selected and target square is legal
+        chess.move({ from: selectedSquare, to: chessSquare });
         setFen(chess.fen());
+        setSelectedSquare(null);
+        setLegalMoves([]);
+      } else {
+        // Reset selection if clicking on an empty or invalid square
+        setSelectedSquare(null);
+        setLegalMoves([]);
       }
     } catch (error) {
       console.error("Error handling square click:", error);
@@ -119,6 +168,7 @@ const PuzzleShootoutModal: React.FC<PuzzleShootoutModalProps> = ({
 
   const solvePuzzle = async (puzzleId: number) => {
     try {
+      // Start processing - timer will be activated via useEffect
       const res = await apiRequest("POST", `/api/puzzles/${puzzleId}/solve`, {
         timeLimit: 15000 // 15 seconds
       });
@@ -135,20 +185,36 @@ const PuzzleShootoutModal: React.FC<PuzzleShootoutModalProps> = ({
         // If AI didn't solve it, user wins
         if (!solved) {
           setUserWon(true);
+          toast({
+            title: "You Win!",
+            description: "AI couldn't solve your puzzle within 15 seconds!",
+            variant: "success"
+          });
         } else {
           // Move to next puzzle
           setCurrentPuzzleIndex(currentPuzzleIndex + 1);
+          
+          // Check if this was the last puzzle (AI solved all 5)
           if (currentPuzzleIndex + 1 >= 5) {
             // User lost after 5 puzzles
+            setAiLost(true);
             toast({
               title: "Game Over",
-              description: "AI solved all puzzles. You lose!",
+              description: "AI solved all your puzzles. Better luck next time!",
               variant: "destructive"
+            });
+          } else {
+            // More puzzles to go
+            toast({
+              title: "AI Solved It",
+              description: "Try creating a more difficult puzzle!",
+              variant: "default"
             });
           }
         }
       }
       
+      // End processing state
       setIsProcessing(false);
     } catch (error) {
       console.error("Error solving puzzle:", error);
@@ -251,16 +317,29 @@ const PuzzleShootoutModal: React.FC<PuzzleShootoutModalProps> = ({
                           : "Failed to solve puzzle"}
                   </p>
                 </div>
-                <div className="w-10 h-10 rounded-full bg-info/20 flex items-center justify-center">
-                  {isProcessing ? (
-                    <Loader2 className="animate-spin h-5 w-5 text-info" />
-                  ) : puzzleSolved === null ? (
-                    <div className="h-5 w-5 text-info" />
-                  ) : puzzleSolved ? (
-                    <CheckCircle className="h-5 w-5 text-success" />
-                  ) : (
-                    <XCircle className="h-5 w-5 text-danger" />
+                <div className="flex items-center gap-2">
+                  {isProcessing && (
+                    <div className={`flex items-center gap-1 px-2 py-1 rounded-md ${
+                      isTimerLow ? 'bg-red-100 animate-pulse' : 'bg-gray-100'
+                    }`}>
+                      <Clock className={`h-4 w-4 ${isTimerLow ? 'text-red-500' : 'text-gray-500'}`} />
+                      <span className={`text-sm font-medium ${isTimerLow ? 'text-red-500' : 'text-gray-500'}`}>
+                        {timeRemaining}s
+                      </span>
+                    </div>
                   )}
+                  
+                  <div className="w-10 h-10 rounded-full bg-info/20 flex items-center justify-center">
+                    {isProcessing ? (
+                      <Loader2 className="animate-spin h-5 w-5 text-info" />
+                    ) : puzzleSolved === null ? (
+                      <div className="h-5 w-5 text-info" />
+                    ) : puzzleSolved ? (
+                      <CheckCircle className="h-5 w-5 text-success" />
+                    ) : (
+                      <XCircle className="h-5 w-5 text-danger" />
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

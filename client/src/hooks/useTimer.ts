@@ -95,5 +95,13 @@ export default function useTimer({
     return validTime; // Return the new time value for chaining
   }, []);
 
-  return { timeRemaining, isTimerLow, resetTimer };
+  // Stop the timer completely
+  const stopTimer = useCallback(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  return { timeRemaining, isTimerLow, resetTimer, stopTimer };
 }
