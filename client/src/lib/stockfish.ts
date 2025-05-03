@@ -1,6 +1,34 @@
-import { Chess, Move } from "chess.js";
+import { Chess, Move, Square } from "chess.js";
 import { apiRequest } from "./queryClient";
-import StockfishWeb from 'stockfish-web';
+
+// Import stockfish through dynamic import to ensure compatibility
+let stockfishPromise: Promise<any> | null = null;
+
+// Type definition for importing Stockfish
+type StockfishModuleType = {
+  default?: () => any;
+} | (() => any);
+
+// Function to get the Stockfish engine instance
+function getStockfishEngine(): Promise<any> {
+  if (!stockfishPromise) {
+    stockfishPromise = import('stockfish-web').then((StockfishModule: StockfishModuleType) => {
+      // Explicitly calling the function to create an instance
+      if (typeof StockfishModule === 'function') {
+        return StockfishModule();
+      } else if (StockfishModule.default && typeof StockfishModule.default === 'function') {
+        return StockfishModule.default();
+      } else {
+        console.error("Stockfish module has unexpected structure");
+        return null;
+      }
+    }).catch(err => {
+      console.error("Error loading Stockfish:", err);
+      return null;
+    });
+  }
+  return stockfishPromise;
+}
 
 // Piece values for Hukum Chess
 export const PIECE_VALUES = {
@@ -20,14 +48,43 @@ async function initStockfish(): Promise<void> {
   if (!stockfishInstance) {
     try {
       console.log("Initializing Stockfish...");
-      stockfishInstance = await Stockfish();
+      stockfishInstance = await getStockfishEngine();
       
-      stockfishInstance.addMessageListener((message: string) => {
+      if (!stockfishInstance) {
+        console.error("Failed to initialize Stockfish engine");
+        return;
+      }
+      
+      // Setup listener for stockfish messages
+      const originalListen = stockfishInstance.listen;
+      stockfishInstance.listen = (message: string) => {
+        // Call original listener if it exists
+        if (originalListen) {
+          originalListen(message);
+        }
+        
+        // Check for readyok
         if (message === 'readyok') {
           isStockfishReady = true;
           console.log("Stockfish is ready");
         }
-      });
+        
+        // Add our custom message handler
+        if (stockfishInstance.messageListeners) {
+          for (const listener of stockfishInstance.messageListeners) {
+            listener(message);
+          }
+        }
+      };
+      
+      // Add message listeners array to stockfish instance
+      stockfishInstance.messageListeners = [];
+      stockfishInstance.addMessageListener = (callback: (message: string) => void) => {
+        if (!stockfishInstance.messageListeners) {
+          stockfishInstance.messageListeners = [];
+        }
+        stockfishInstance.messageListeners.push(callback);
+      };
       
       // Configure Stockfish
       stockfishInstance.postMessage('uci');
