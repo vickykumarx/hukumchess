@@ -420,7 +420,7 @@ export default function useChessGame(): UseChessGameReturn {
   
   // Check if the game is over
   const checkGameOver = useCallback((): boolean => {
-    // Check for checkmate
+    // Check for checkmate (immediate win condition)
     if (isCheckmate(chess)) {
       const winner = chess.turn() === 'w' ? "ai_win" : "player_win";
       setGameState(winner);
@@ -428,15 +428,18 @@ export default function useChessGame(): UseChessGameReturn {
       
       // Update game status on server
       if (gameId) {
-        apiRequest("PATCH", `/api/games/${gameId}`, { status: winner })
-          .catch(error => console.error("Error updating game status:", error));
+        apiRequest("PATCH", `/api/games/${gameId}`, { 
+          status: winner,
+          playerScore,
+          aiScore
+        }).catch(error => console.error("Error updating game status:", error));
       }
       
       return true;
     }
     
-    // Check if move limits are reached (6 moves each)
-    if (!freeHitAvailable && (playerMoves >= 6 && aiMoves >= 6)) {
+    // Check if standard move limits are reached (6 moves each for both players)
+    if (playerMoves >= 6 && aiMoves >= 6) {
       // Determine winner by score
       if (playerScore > aiScore) {
         setGameState("player_win");
@@ -461,15 +464,30 @@ export default function useChessGame(): UseChessGameReturn {
       return true;
     }
     
-    // Check for free hit rule - if playerMoves is 6 but freeHitAvailable is true
+    // Check for Free Hit rule - player gets a 7th move if:
+    // 1. Player is player1
+    // 2. AI's 6th move was a foul capture
+    // 3. Player has already made 6 moves
+    if (playerMoves >= 6 && freeHitAvailable && playerRole === "player1") {
+      // Player still has a free hit move (don't end game)
+      return false;
+    }
+    
+    // Handle the case where player1 has made 6 moves (or 7 with free hit) but player2/AI still has moves left
     if (playerMoves >= 6 && !freeHitAvailable && aiMoves < 6) {
       // AI still has moves left
       makeAIMove();
       return false;
     }
     
+    // Handle the case where AI (as player1) has made 6 moves but player2 still has moves left
+    if (aiMoves >= 6 && playerMoves < 6) {
+      // Player still has moves left
+      return false;
+    }
+    
     return false;
-  }, [chess, playerMoves, aiMoves, playerScore, aiScore, freeHitAvailable, gameId, makeAIMove]);
+  }, [chess, playerMoves, aiMoves, playerScore, aiScore, freeHitAvailable, playerRole, gameId, makeAIMove]);
   
   // Resign the game
   const resignGame = useCallback(() => {

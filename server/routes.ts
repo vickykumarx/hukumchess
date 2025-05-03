@@ -99,13 +99,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const move = await storage.createMoveHistory(moveData);
       
+      // Safely handle potentially null values in the game object
+      const currentPlayerMoves = game.playerMoves ?? 0;
+      const currentAiMoves = game.aiMoves ?? 0;
+      const currentPlayerScore = game.playerScore ?? 0;
+      const currentAiScore = game.aiScore ?? 0;
+      
       // Update game state
       const updatedGame = await storage.updateGame(gameId, { 
         fen: req.body.resultingFen,
-        playerMoves: moveData.isPlayer ? game.playerMoves + 1 : game.playerMoves,
-        aiMoves: !moveData.isPlayer ? game.aiMoves + 1 : game.aiMoves,
-        playerScore: moveData.isPlayer ? game.playerScore + (moveData.points || 0) : game.playerScore,
-        aiScore: !moveData.isPlayer ? game.aiScore + (moveData.points || 0) : game.aiScore
+        playerMoves: moveData.isPlayer ? currentPlayerMoves + 1 : currentPlayerMoves,
+        aiMoves: !moveData.isPlayer ? currentAiMoves + 1 : currentAiMoves,
+        playerScore: moveData.isPlayer ? currentPlayerScore + (moveData.points || 0) : currentPlayerScore,
+        aiScore: !moveData.isPlayer ? currentAiScore + (moveData.points || 0) : currentAiScore
       });
       
       res.status(201).json({ move, game: updatedGame });
