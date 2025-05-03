@@ -1,8 +1,11 @@
 import { useState, useEffect } from "react";
 import { Chessboard } from "react-chessboard";
 import { Square, Color } from "chess.js";
-import { Check, ArrowUp } from "lucide-react";
+import { Check, ArrowUp, RotateCw, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface ChessBoardProps {
   fen: string;
@@ -31,6 +34,7 @@ const ChessBoard: React.FC<ChessBoardProps> = ({
 }) => {
   const [boardWidth, setBoardWidth] = useState<number>(600);
   const [captureMove, setCaptureMove] = useState<{ piece: string, square: Square } | null>(null);
+  const [flipBoard, setFlipBoard] = useState<boolean>(false);
 
   // Resize board based on container size
   useEffect(() => {
@@ -68,7 +72,7 @@ const ChessBoard: React.FC<ChessBoardProps> = ({
     if (selectedSquare) {
       squares[selectedSquare] = {
         ...squares[selectedSquare],
-        backgroundColor: 'rgba(249, 115, 22, 0.4)'
+        backgroundColor: 'rgba(249, 115, 22, 0.6)'
       };
     }
     
@@ -76,7 +80,7 @@ const ChessBoard: React.FC<ChessBoardProps> = ({
     legalMoves.forEach(move => {
       squares[move] = {
         ...squares[move],
-        background: 'radial-gradient(circle, rgba(249, 115, 22, 0.4) 25%, transparent 25%)'
+        background: `radial-gradient(circle, rgba(249, 115, 22, 0.5) 25%, ${(squares[move]?.backgroundColor as string) || 'transparent'} 25%)`
       };
     });
     
@@ -86,10 +90,69 @@ const ChessBoard: React.FC<ChessBoardProps> = ({
   return (
     <div className="w-full md:w-3/4 order-1 md:order-2 flex flex-col">
       {/* Game Status Banner */}
-      <div className={`${
-        currentTurn === playerSide ? 'bg-info/10 text-info' : 'bg-secondary/10 text-secondary'
-      } p-2 rounded-md mb-3 text-sm font-medium text-center`}>
-        {currentTurn === playerSide ? 'Your turn' : "AI's turn"} - {remainingMoves} moves remaining
+      <Card className="mb-4 shadow-md">
+        <div className="p-3">
+          <div className="flex justify-between items-center">
+            <Badge className={`${
+              currentTurn === playerSide ? 'bg-success/90 hover:bg-success/80' : 'bg-secondary/90 hover:bg-secondary/80'
+            } text-white px-3 py-1`}>
+              {currentTurn === playerSide ? 'Your turn' : "AI's turn"}
+            </Badge>
+            
+            <Badge className="bg-primary/90 hover:bg-primary/80 text-white">
+              {remainingMoves} {remainingMoves === 1 ? 'move' : 'moves'} remaining
+            </Badge>
+          </div>
+          
+          <div className="mt-2 text-sm font-medium text-center bg-gray-50 rounded-md p-2">
+            {status || "Make your move"}
+          </div>
+        </div>
+      </Card>
+      
+      {/* Chess Board Controls */}
+      <div className="flex justify-between mb-3">
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setFlipBoard(!flipBoard)}
+                className="flex items-center gap-1"
+              >
+                <RotateCw className="h-4 w-4" />
+                Flip
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Flip the board view</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="sm"
+                variant="outline"
+                className="flex items-center gap-1"
+                onClick={() => onSquareClick(selectedSquare as Square)}
+              >
+                <AlertCircle className="h-4 w-4" />
+                Rules
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent className="w-60">
+              <p>
+                Hukum Chess: Each player has exactly 6 moves. 
+                Win by scoring the most points through captures (Queen:9, Rook:5, Bishop/Knight:3, Pawn:1) 
+                or by checkmate.
+              </p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       </div>
       
       {/* Chess Board */}
@@ -102,10 +165,11 @@ const ChessBoard: React.FC<ChessBoardProps> = ({
           position={fen}
           boardWidth={boardWidth}
           customSquareStyles={customSquareStyles()}
-          boardOrientation={playerSide === "white" ? "white" : "black"}
+          boardOrientation={flipBoard ? (playerSide === "white" ? "black" : "white") : (playerSide === "white" ? "white" : "black")}
           onSquareClick={onSquareClick}
           onPieceDrop={onPieceDrop}
           arePiecesDraggable={currentTurn === playerSide}
+          areArrowsAllowed={true}
         />
       </div>
       
@@ -129,6 +193,15 @@ const ChessBoard: React.FC<ChessBoardProps> = ({
           </Button>
         </div>
       )}
+      
+      {/* Game instructions */}
+      <div className="mt-6 text-center text-sm text-gray-500">
+        {currentTurn === playerSide ? (
+          <p>Click on a piece to see possible moves, then click on a destination square to move.</p>
+        ) : (
+          <p>AI is thinking about its next move...</p>
+        )}
+      </div>
     </div>
   );
 };

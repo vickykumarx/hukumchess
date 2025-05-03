@@ -157,8 +157,15 @@ export default function useChessGame(): UseChessGameReturn {
     if (gameState !== "in_progress" || !gameId) return;
     
     try {
+      // Set status to indicate AI is thinking
+      setStatus("AI is thinking...");
+      
       // Get AI move from Stockfish
-      const move = await getAIMove(chess.fen(), 15, 2000);
+      const move = await getAIMove(chess.fen(), 3, 1000);
+      
+      if (!move || move.length < 4) {
+        throw new Error("Invalid AI move received");
+      }
       
       // Parse the move
       const from = move.substring(0, 2) as Square;
@@ -173,7 +180,7 @@ export default function useChessGame(): UseChessGameReturn {
       });
       
       if (!moveObj) {
-        throw new Error("Invalid AI move");
+        throw new Error("Invalid AI move: " + move);
       }
       
       // Calculate score for the move
@@ -197,42 +204,59 @@ export default function useChessGame(): UseChessGameReturn {
       // Save move to server
       await apiRequest("POST", `/api/games/${gameId}/moves`, moveData);
       
-      // Add to local move history
+      // Add to local move history (add to beginning for newest first)
       setMoveHistory(prev => [
-        ...prev,
         {
           id: Date.now(),
           ...moveData
-        }
+        },
+        ...prev
       ]);
       
       // Check if this was a "foul capture" that enables Free Hit
       if (aiMoves === 5 && moveObj.captured) {
         const foulCapture = await isFoulCapture(chess, `${from}${to}`);
         setFreeHitAvailable(foulCapture);
+        
+        if (foulCapture) {
+          toast({
+            title: "Free Hit Available!",
+            description: "AI made a foul capture. You get one free move!",
+            variant: "default"
+          });
+        }
       }
       
       // Check if game is over
-      checkGameOver();
+      const gameOver = checkGameOver();
       
-      // Reset timer for player's move
-      resetTimer(playerMoves === 0 ? 60 : 30);
-      
-      // Update status message
-      setStatus(moveObj.captured ? `AI captured your ${moveObj.captured}` : "AI moved");
+      if (!gameOver) {
+        // Reset timer for player's move
+        resetTimer(playerMoves === 0 ? 60 : 30);
+        
+        // Update status message
+        setStatus(moveObj.captured ? `AI captured your ${moveObj.captured}` : "Your turn");
+      }
     } catch (error) {
       console.error("Error making AI move:", error);
       toast({
         title: "Error",
-        description: "Failed to make AI move",
+        description: "Failed to make AI move. Try again.",
         variant: "destructive"
       });
+      
+      // If we can't make an AI move, at least let the player continue
+      resetTimer(playerMoves === 0 ? 60 : 30);
+      setStatus("Your turn (AI move failed)");
     }
   }, [chess, aiMoves, gameId, gameState, playerMoves, resetTimer, toast]);
   
   // Make a player move
   const makeMove = useCallback((from: Square, to: Square): boolean => {
-    if (gameState !== "in_progress" || !isPlayerTurn || !gameId) return false;
+    if (gameState !== "in_progress" || !isPlayerTurn || !gameId) {
+      setStatus(gameState !== "in_progress" ? "Game not in progress" : "Not your turn");
+      return false;
+    }
     
     try {
       // Check if move is legal
@@ -271,11 +295,11 @@ export default function useChessGame(): UseChessGameReturn {
       
       // Add to local move history
       setMoveHistory(prev => [
-        ...prev,
         {
           id: Date.now(),
           ...moveData
-        }
+        },
+        ...prev
       ]);
       
       // Reset selected square and legal moves
@@ -289,18 +313,22 @@ export default function useChessGame(): UseChessGameReturn {
         // Reset timer for AI's move
         resetTimer(aiMoves === 0 ? 60 : 30);
         
+        // Update status message
+        setStatus(move.captured ? `You captured ${move.captured}` : "AI thinking...");
+        
         // Make AI move after a short delay
         setTimeout(() => {
           makeAIMove();
-        }, 500);
+        }, 1000);
+      } else {
+        // Update status message for game over
+        setStatus(move.captured ? `You captured ${move.captured}` : "You moved");
       }
-      
-      // Update status message
-      setStatus(move.captured ? `You captured ${move.captured}` : "You moved");
       
       return true;
     } catch (error) {
       console.error("Error making move:", error);
+      setStatus("Error making move");
       return false;
     }
   }, [chess, gameState, isPlayerTurn, gameId, playerMoves, aiMoves, resetTimer, makeAIMove]);
