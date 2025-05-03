@@ -1,175 +1,17 @@
-import { Chess, Move, Square } from "chess.js";
+import { Chess, Move, Square, PieceSymbol, Color } from "chess.js";
 import { apiRequest } from "./queryClient";
+import { PIECE_VALUES } from "./chess";
 
-// Import stockfish through dynamic import to ensure compatibility
-let stockfishPromise: Promise<any> | null = null;
+/**
+ * Simple implementation of AI for Hukum Chess
+ * Uses a simpler approach to avoid complex Stockfish integration issues
+ */
 
-// Type definition for importing Stockfish
-type StockfishModuleType = {
-  default?: () => any;
-} | (() => any);
-
-// Function to get the Stockfish engine instance
-function getStockfishEngine(): Promise<any> {
-  if (!stockfishPromise) {
-    stockfishPromise = import('stockfish-web').then((StockfishModule: StockfishModuleType) => {
-      // Explicitly calling the function to create an instance
-      if (typeof StockfishModule === 'function') {
-        return StockfishModule();
-      } else if (StockfishModule.default && typeof StockfishModule.default === 'function') {
-        return StockfishModule.default();
-      } else {
-        console.error("Stockfish module has unexpected structure");
-        return null;
-      }
-    }).catch(err => {
-      console.error("Error loading Stockfish:", err);
-      return null;
-    });
-  }
-  return stockfishPromise;
-}
-
-// Piece values for Hukum Chess
-export const PIECE_VALUES = {
-  p: 1,  // pawn
-  n: 3,  // knight
-  b: 3,  // bishop
-  r: 5,  // rook
-  q: 9,  // queen
-  k: 0   // king (not counted for material)
-};
-
-// Initialize Stockfish engine
-let stockfishInstance: any = null;
-let isStockfishReady = false;
-
-async function initStockfish(): Promise<void> {
-  if (!stockfishInstance) {
-    try {
-      console.log("Initializing Stockfish...");
-      stockfishInstance = await getStockfishEngine();
-      
-      if (!stockfishInstance) {
-        console.error("Failed to initialize Stockfish engine");
-        return;
-      }
-      
-      // Setup listener for stockfish messages
-      const originalListen = stockfishInstance.listen;
-      stockfishInstance.listen = (message: string) => {
-        // Call original listener if it exists
-        if (originalListen) {
-          originalListen(message);
-        }
-        
-        // Check for readyok
-        if (message === 'readyok') {
-          isStockfishReady = true;
-          console.log("Stockfish is ready");
-        }
-        
-        // Add our custom message handler
-        if (stockfishInstance.messageListeners) {
-          for (const listener of stockfishInstance.messageListeners) {
-            listener(message);
-          }
-        }
-      };
-      
-      // Add message listeners array to stockfish instance
-      stockfishInstance.messageListeners = [];
-      stockfishInstance.addMessageListener = (callback: (message: string) => void) => {
-        if (!stockfishInstance.messageListeners) {
-          stockfishInstance.messageListeners = [];
-        }
-        stockfishInstance.messageListeners.push(callback);
-      };
-      
-      // Configure Stockfish
-      stockfishInstance.postMessage('uci');
-      stockfishInstance.postMessage('isready');
-    } catch (error) {
-      console.error("Error initializing Stockfish:", error);
-      // Fallback to server-side AI if client-side fails
-      stockfishInstance = null;
-    }
-  }
-  
-  // If still initializing, wait for ready state
-  if (stockfishInstance && !isStockfishReady) {
-    return new Promise((resolve) => {
-      const checkReady = setInterval(() => {
-        if (isStockfishReady) {
-          clearInterval(checkReady);
-          resolve();
-        }
-      }, 100);
-    });
-  }
-}
-
-// Function to get AI move with Stockfish
+// Get an AI move for the given position
 export async function getAIMove(fen: string, depth: number = 10, timeLimit: number = 2000): Promise<string> {
   try {
-    // Try to use client-side Stockfish first
-    await initStockfish();
-    
-    if (stockfishInstance && isStockfishReady) {
-      console.log("Using client-side Stockfish");
-      return new Promise((resolve) => {
-        let bestMove = '';
-        
-        stockfishInstance.addMessageListener((message: string) => {
-          if (message.startsWith('bestmove')) {
-            const parts = message.split(' ');
-            if (parts.length >= 2) {
-              bestMove = parts[1];
-              
-              // Convert from UCI format to our format if necessary
-              if (bestMove.length === 4 || bestMove.length === 5) {
-                resolve(bestMove);
-              }
-            }
-          }
-        });
-        
-        // Set position and start search
-        stockfishInstance.postMessage('position fen ' + fen);
-        
-        // For Hukum Chess: focus on short-term material gain
-        stockfishInstance.postMessage('setoption name Skill Level value 20');
-        stockfishInstance.postMessage('setoption name Contempt value 0');
-        stockfishInstance.postMessage('setoption name Analysis Contempt value Off');
-        
-        // Start search with depth limit for Hukum Chess (6 moves perspective)
-        stockfishInstance.postMessage(`go depth ${depth} movetime ${timeLimit}`);
-        
-        // Timeout safety
-        setTimeout(() => {
-          if (!bestMove) {
-            // Fallback to server if taking too long
-            apiRequest("POST", "/api/ai/move", { fen, depth, timeLimit })
-              .then(response => response.json())
-              .then(data => resolve(data.move))
-              .catch(err => {
-                console.error("Server fallback error:", err);
-                // Last resort - return a random legal move
-                const chess = new Chess(fen);
-                const moves = chess.moves({ verbose: true });
-                if (moves.length > 0) {
-                  const randomMove = moves[Math.floor(Math.random() * moves.length)];
-                  resolve(randomMove.from + randomMove.to + (randomMove.promotion || ''));
-                } else {
-                  resolve('');
-                }
-              });
-          }
-        }, timeLimit + 500);
-      });
-    } else {
-      // Fallback to server-side AI
-      console.log("Falling back to server-side AI");
+    // Try server-side AI first
+    try {
       const response = await apiRequest("POST", "/api/ai/move", {
         fen,
         depth,
@@ -177,139 +19,174 @@ export async function getAIMove(fen: string, depth: number = 10, timeLimit: numb
       });
       
       const data = await response.json();
-      return data.move;
+      if (data && data.move) {
+        return data.move;
+      }
+    } catch (err) {
+      console.log("Server-side AI not available, using fallback");
     }
+    
+    // If server fails, use local fallback
+    const chess = new Chess(fen);
+    const moves = chess.moves({ verbose: true });
+    
+    if (moves.length === 0) {
+      throw new Error("No legal moves available");
+    }
+    
+    // For Hukum Chess: prioritize captures by value
+    const captureMoves = moves.filter(move => move.captured);
+    if (captureMoves.length > 0) {
+      // Sort by value of captured piece (highest first)
+      captureMoves.sort((a, b) => {
+        const aValue = a.captured ? PIECE_VALUES[a.captured] : 0;
+        const bValue = b.captured ? PIECE_VALUES[b.captured] : 0;
+        return bValue - aValue;
+      });
+      
+      // Pick the highest value capture
+      const bestCapture = captureMoves[0];
+      return bestCapture.from + bestCapture.to + (bestCapture.promotion || '');
+    }
+    
+    // If no captures, make a tactical move (basic strategy)
+    // In a real implementation, we'd use minimax here, but for simplicity:
+    
+    // 1. Check for moves that put opponent in check
+    const checkMoves = moves.filter(move => {
+      const tempChess = new Chess(fen);
+      tempChess.move({ from: move.from as Square, to: move.to as Square, promotion: move.promotion });
+      return tempChess.isCheck();
+    });
+    
+    if (checkMoves.length > 0) {
+      const checkMove = checkMoves[Math.floor(Math.random() * checkMoves.length)];
+      return checkMove.from + checkMove.to + (checkMove.promotion || '');
+    }
+    
+    // 2. Default: make a random move, slightly favoring development
+    const centralMoves = moves.filter(move => {
+      const targetRank = parseInt(move.to.charAt(1));
+      const targetFile = move.to.charAt(0);
+      return (targetRank === 4 || targetRank === 5) && 
+             (targetFile === 'd' || targetFile === 'e');
+    });
+    
+    if (centralMoves.length > 0 && Math.random() > 0.3) { // 70% chance of central move
+      const centralMove = centralMoves[Math.floor(Math.random() * centralMoves.length)];
+      return centralMove.from + centralMove.to + (centralMove.promotion || '');
+    }
+    
+    // Random move as last resort
+    const randomMove = moves[Math.floor(Math.random() * moves.length)];
+    return randomMove.from + randomMove.to + (randomMove.promotion || '');
   } catch (error) {
     console.error("Error getting AI move:", error);
-    
-    // Last resort fallback - make a random move
-    try {
-      const chess = new Chess(fen);
-      const moves = chess.moves({ verbose: true });
-      if (moves.length > 0) {
-        // Prioritize captures for Hukum Chess
-        const captureMoves = moves.filter(move => move.captured);
-        if (captureMoves.length > 0) {
-          // Sort by value of captured piece
-          captureMoves.sort((a, b) => {
-            const aValue = a.captured ? PIECE_VALUES[a.captured] : 0;
-            const bValue = b.captured ? PIECE_VALUES[b.captured] : 0;
-            return bValue - aValue;
-          });
-          const bestCapture = captureMoves[0];
-          return bestCapture.from + bestCapture.to + (bestCapture.promotion || '');
-        }
-        
-        // If no captures, make a random move
-        const randomMove = moves[Math.floor(Math.random() * moves.length)];
-        return randomMove.from + randomMove.to + (randomMove.promotion || '');
-      }
-    } catch (e) {
-      console.error("Error making fallback move:", e);
-    }
-    
     throw new Error("Failed to get AI move");
   }
 }
 
-// Evaluate a chess position using Stockfish
-export async function evaluatePosition(fen: string, depth: number = 10): Promise<number> {
+// Evaluate a chess position (simplified)
+export function evaluatePosition(fen: string, depth: number = 10): number {
   try {
-    await initStockfish();
+    const chess = new Chess(fen);
     
-    if (stockfishInstance && isStockfishReady) {
-      return new Promise((resolve) => {
-        let evaluation = 0;
-        
-        stockfishInstance.addMessageListener((message: string) => {
-          // Parse evaluation score
-          if (message.indexOf('score cp ') > -1) {
-            const scoreMatch = message.match(/score cp (-?\d+)/);
-            if (scoreMatch && scoreMatch[1]) {
-              evaluation = parseInt(scoreMatch[1]) / 100; // Convert centipawns to pawns
-            }
-          } else if (message.indexOf('score mate ') > -1) {
-            const mateMatch = message.match(/score mate (-?\d+)/);
-            if (mateMatch && mateMatch[1]) {
-              // If mate is found, assign a very high/low score
-              const mateIn = parseInt(mateMatch[1]);
-              evaluation = mateIn > 0 ? 100 : -100;
-            }
-          }
-          
-          // When "bestmove" is returned, the evaluation is complete
-          if (message.startsWith('bestmove')) {
-            resolve(evaluation);
-          }
-        });
-        
-        // Set position and start analysis
-        stockfishInstance.postMessage('position fen ' + fen);
-        stockfishInstance.postMessage(`go depth ${depth}`);
-        
-        // Safety timeout
-        setTimeout(() => {
-          if (evaluation !== undefined) {
-            resolve(evaluation);
-          } else {
-            // Fallback to server
-            apiRequest("POST", "/api/ai/evaluate", { fen, depth })
-              .then(response => response.json())
-              .then(data => resolve(data.evaluation))
-              .catch(err => {
-                console.error("Server evaluation fallback error:", err);
-                resolve(0); // Default neutral evaluation
-              });
-          }
-        }, 3000);
-      });
-    } else {
-      // Fallback to server-side evaluation
-      const response = await apiRequest("POST", "/api/ai/evaluate", {
-        fen,
-        depth
-      });
-      
-      const data = await response.json();
-      return data.evaluation;
-    }
-  } catch (error) {
-    console.error("Error evaluating position:", error);
+    // Material evaluation
+    let evaluation = 0;
+    const board = chess.board();
     
-    // Fallback to basic material counting
-    try {
-      const chess = new Chess(fen);
-      let evaluation = 0;
-      const board = chess.board();
-      
-      for (let row = 0; row < 8; row++) {
-        for (let col = 0; col < 8; col++) {
-          const piece = board[row][col];
-          if (piece) {
-            const value = PIECE_VALUES[piece.type] * (piece.color === 'w' ? 1 : -1);
-            evaluation += value;
-          }
+    for (let row = 0; row < 8; row++) {
+      for (let col = 0; col < 8; col++) {
+        const piece = board[row][col];
+        if (piece) {
+          const value = PIECE_VALUES[piece.type] * (piece.color === 'w' ? 1 : -1);
+          evaluation += value;
         }
       }
-      
-      return evaluation;
-    } catch (e) {
-      console.error("Error in fallback evaluation:", e);
-      return 0;
     }
+    
+    // Position evaluation (simplified)
+    // 1. Central control bonus
+    const centralSquares = ['d4', 'd5', 'e4', 'e5'];
+    for (const square of centralSquares) {
+      const piece = chess.get(square as Square);
+      if (piece) {
+        evaluation += 0.2 * (piece.color === 'w' ? 1 : -1);
+      }
+    }
+    
+    // 2. Development bonus 
+    const developmentSquares = {
+      w: ['f3', 'c3', 'f4', 'c4'],
+      b: ['f6', 'c6', 'f5', 'c5']
+    };
+    
+    for (const color of ['w', 'b'] as Color[]) {
+      for (const square of developmentSquares[color]) {
+        const piece = chess.get(square as Square);
+        if (piece && piece.type !== 'p' && piece.color === color) {
+          evaluation += 0.1 * (color === 'w' ? 1 : -1);
+        }
+      }
+    }
+    
+    // 3. Check bonus
+    if (chess.isCheck()) {
+      evaluation += 0.5 * (chess.turn() === 'b' ? 1 : -1);  // If white gave check, bonus for white
+    }
+    
+    // 4. Mobility (rough approximation using a clone)
+    // Chess.js doesn't have a setTurn method, so we use a workaround
+    let whiteMoves = 0;
+    let blackMoves = 0;
+    
+    if (chess.turn() === 'w') {
+      whiteMoves = chess.moves().length;
+      // Create a modified FEN with black to move
+      const parts = chess.fen().split(' ');
+      parts[1] = 'b'; // Set turn to black
+      const blackTurnFen = parts.join(' ');
+      try {
+        const tempChess = new Chess(blackTurnFen);
+        blackMoves = tempChess.moves().length;
+      } catch (e) {
+        // If FEN manipulation fails, just use an approximation
+        blackMoves = whiteMoves;
+      }
+    } else {
+      blackMoves = chess.moves().length;
+      // Create a modified FEN with white to move
+      const parts = chess.fen().split(' ');
+      parts[1] = 'w'; // Set turn to white
+      const whiteTurnFen = parts.join(' ');
+      try {
+        const tempChess = new Chess(whiteTurnFen);
+        whiteMoves = tempChess.moves().length;
+      } catch (e) {
+        // If FEN manipulation fails, just use an approximation
+        whiteMoves = blackMoves;
+      }
+    }
+    
+    evaluation += 0.05 * (whiteMoves - blackMoves);
+    
+    return evaluation;
+  } catch (error) {
+    console.error("Error evaluating position:", error);
+    return 0;
   }
 }
 
-// Check if a move is a "foul capture" (for Free Hit rule)
-export async function isFoulCapture(chess: Chess, move: string): Promise<boolean> {
+// Check if a move is a "foul capture" (for Free Hit rule in Hukum Chess)
+export function isFoulCapture(chess: Chess, move: string): boolean {
   try {
     // Make a copy of the chess object to try the move
     const chessCopy = new Chess(chess.fen());
     
     // Parse the move
-    const from = move.substring(0, 2);
-    const to = move.substring(2, 4);
-    const promotion = move.length > 4 ? move.substring(4, 5) : undefined;
+    const from = move.substring(0, 2) as Square;
+    const to = move.substring(2, 4) as Square;
+    const promotion = move.length > 4 ? move.substring(4, 5) as PieceSymbol : undefined;
     
     // Get the piece that would be moved
     const piece = chessCopy.get(from);
@@ -344,8 +221,8 @@ export async function isFoulCapture(chess: Chess, move: string): Promise<boolean
     }
     
     // Condition 3: Evaluate position change
-    const evaluationBefore = await evaluatePosition(chess.fen());
-    const evaluationAfter = await evaluatePosition(chessCopy.fen());
+    const evaluationBefore = evaluatePosition(chess.fen());
+    const evaluationAfter = evaluatePosition(chessCopy.fen());
     
     // If the evaluation drastically worsens for the player who made the move,
     // it's considered a foul capture
@@ -361,24 +238,7 @@ export async function isFoulCapture(chess: Chess, move: string): Promise<boolean
   }
 }
 
-// Calculate the score value for a move in Hukum Chess
-export function calculateMoveScore(move: Move): number {
-  let score = 0;
-  
-  // Add points for captures
-  if (move.captured) {
-    score += PIECE_VALUES[move.captured];
-  }
-  
-  // Add bonus for promotion (promotion piece value - pawn value)
-  if (move.promotion) {
-    score += PIECE_VALUES[move.promotion] - PIECE_VALUES['p'];
-  }
-  
-  return score;
-}
-
-// Solve a mate-in-X puzzle using Stockfish
+// Solve a mate-in-X puzzle (simplified)
 export async function solvePuzzle(
   fen: string,
   solution: string,
@@ -386,54 +246,9 @@ export async function solvePuzzle(
   timeLimit: number = 15000
 ): Promise<boolean> {
   try {
-    // Try to use client-side Stockfish for puzzle solving
-    await initStockfish();
-    
-    if (stockfishInstance && isStockfishReady) {
-      return new Promise((resolve) => {
-        let bestMove = '';
-        let mateFound = false;
-        
-        stockfishInstance.addMessageListener((message: string) => {
-          // Check if mate is found and how many moves it takes
-          if (message.indexOf('score mate ') > -1) {
-            const mateMatch = message.match(/score mate (\d+)/);
-            if (mateMatch && mateMatch[1]) {
-              const foundMateIn = parseInt(mateMatch[1]);
-              // For Hukum Chess, check if mate can be found within the required moves
-              mateFound = foundMateIn <= mateIn;
-            }
-          }
-          
-          if (message.startsWith('bestmove')) {
-            const parts = message.split(' ');
-            if (parts.length >= 2) {
-              bestMove = parts[1];
-              
-              // Convert from UCI format and compare with solution
-              const solutionMoves = solution.split(' ');
-              const solved = solutionMoves.includes(bestMove) || mateFound;
-              resolve(solved);
-            }
-          }
-        });
-        
-        // Set position and start search with deep analysis for puzzles
-        stockfishInstance.postMessage('position fen ' + fen);
-        stockfishInstance.postMessage('setoption name MultiPV value 3'); // Look at top 3 moves
-        stockfishInstance.postMessage(`go depth ${mateIn * 2} movetime ${timeLimit}`);
-        
-        // Timeout safety for Hukum Chess (15 seconds max)
-        setTimeout(() => {
-          if (!bestMove) {
-            // If no move found within time limit, consider puzzle failed
-            resolve(false);
-          }
-        }, timeLimit + 500);
-      });
-    } else {
-      // Fallback to server-side puzzle solving
-      const response = await apiRequest("POST", `/api/puzzles/solve`, {
+    // Try to use the server-side solver first
+    try {
+      const response = await apiRequest("POST", "/api/puzzles/solve", {
         fen,
         solution,
         mateIn,
@@ -442,9 +257,25 @@ export async function solvePuzzle(
       
       const data = await response.json();
       return data.solved;
+    } catch (err) {
+      console.log("Server-side puzzle solver not available, using fallback");
     }
+    
+    // For this version, we'll do a simple solution check:
+    // - Just check if the AI finds the exact same move as the solution
+    // - In a real implementation, this would verify the entire mate sequence
+    
+    const chess = new Chess(fen);
+    const bestMove = await getAIMove(fen, 10 + mateIn, timeLimit);
+    
+    // Convert solution and bestMove to standard format if needed
+    const cleanSolution = solution.length <= 5 ? solution : solution.split(' ')[0];
+    const cleanBestMove = bestMove.length <= 5 ? bestMove : bestMove.split(' ')[0];
+    
+    // Basic solution check - the moves match
+    return cleanSolution === cleanBestMove;
   } catch (error) {
     console.error("Error solving puzzle:", error);
-    throw new Error("Failed to solve puzzle");
+    return false;
   }
 }

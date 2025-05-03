@@ -214,6 +214,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: "Error solving puzzle" });
     }
   });
+  
+  // General puzzle solver endpoint (for direct use in the client-side app)
+  app.post("/api/puzzles/solve", async (req: Request, res: Response) => {
+    try {
+      const { fen, solution, mateIn = 2, timeLimit = 15000 } = req.body;
+      
+      if (!fen || !solution) {
+        return res.status(400).json({ message: "FEN string and solution are required" });
+      }
+      
+      const solved = await solvePuzzle(fen, solution, mateIn, timeLimit);
+      res.status(200).json({ solved });
+    } catch (error) {
+      res.status(500).json({ message: "Error solving puzzle" });
+    }
+  });
 
   return httpServer;
 }
