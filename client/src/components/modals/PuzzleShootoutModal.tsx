@@ -188,7 +188,7 @@ const PuzzleShootoutModal: React.FC<PuzzleShootoutModalProps> = ({
           toast({
             title: "You Win!",
             description: "AI couldn't solve your puzzle within 15 seconds!",
-            variant: "success"
+            variant: "default"
           });
         } else {
           // Move to next puzzle
@@ -249,6 +249,18 @@ const PuzzleShootoutModal: React.FC<PuzzleShootoutModalProps> = ({
               Continue
             </Button>
           </div>
+        ) : aiLost ? (
+          <div className="text-center py-8">
+            <Trophy className="mx-auto h-16 w-16 text-amber-500 mb-4" />
+            <h3 className="text-xl font-bold mb-2">Challenge Complete</h3>
+            <p className="text-gray-600 mb-6">AI solved all 5 puzzles. Better luck next time!</p>
+            <Button 
+              onClick={onClose}
+              className="bg-primary text-white hover:bg-primary/90"
+            >
+              Continue
+            </Button>
+          </div>
         ) : (
           <>
             {/* Puzzle Editor */}
@@ -263,6 +275,32 @@ const PuzzleShootoutModal: React.FC<PuzzleShootoutModalProps> = ({
                   onSquareClick={handleSquareClick}
                   customBoardStyle={{
                     borderRadius: "0.375rem",
+                  }}
+                  customSquareStyles={{
+                    ...(selectedSquare ? {
+                      [selectedSquare]: {
+                        backgroundColor: 'rgba(249, 115, 22, 0.6)',
+                        boxShadow: 'inset 0 0 0 4px rgba(249, 115, 22, 0.8)'
+                      }
+                    } : {}),
+                    ...(legalMoves.reduce((styles, square) => {
+                      // Check if this is a capture move or just a regular move
+                      const isPotentialCapture = fen.split(' ')[0].split('/').join('').includes(square);
+                      
+                      if (isPotentialCapture) {
+                        styles[square] = {
+                          boxShadow: 'inset 0 0 0 4px rgba(220, 38, 38, 0.7)',
+                          cursor: 'pointer'
+                        };
+                      } else {
+                        styles[square] = {
+                          backgroundColor: 'rgba(249, 115, 22, 0.3)',
+                          cursor: 'pointer'
+                        };
+                      }
+                      
+                      return styles;
+                    }, {} as Record<string, React.CSSProperties>))
                   }}
                 />
               </div>
